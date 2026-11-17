@@ -1,0 +1,36 @@
+# Reverse proxy duy nhất đi ra ngoài container. Chỉ phục vụ HTTPS nội bộ với chứng chỉ do CMIT cấp.
+# Đăng nhập bằng basic auth. Sau khi đăng nhập, Caddy gán header danh tính cho app.
+#
+# Trước khi chạy:
+#   1. Đặt cmit.crt và cmit.key vào deploy/certs/ (xem deploy/certs/README.md).
+#   2. Thay các dòng user bằng user và hash mật khẩu. Tạo hash:
+#        docker run --rm caddy:2.8-alpine caddy hash-password --plaintext 'MatKhauMoi'
+#   3. Kiểm tra cú pháp: docker compose run --rm proxy caddy validate --config /etc/caddy/Caddyfile
+
+{$CMIT_HOST} {
+	tls /etc/caddy/certs/cmit.crt /etc/caddy/certs/cmit.key
+
+	# Giới hạn kích thước upload. Đủ cho file RAW 3–5 triệu dòng.
+	request_body {
+		max_size 2GB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+
+	basic_auth {
+		# Username phải là định danh dạng email hoặc tên nội bộ (chữ thường, số, . _ % + - @)
+		# Ví dụ dòng sau cần thay bằng user thật:
+		nguoi.dung.mau@cmit.local $2a$14$REPLACE_WITH_BCRYPT_HASH_FROM_CADDY_HASH_PASSWORD
+	}
+
+	# Ghi đè header danh tính bằng user đã xác thực. Client không thể tự gửi header này để giả danh.
+	request_header X-Auth-Request-Email {http.auth.user.id}
+
+	reverse_proxy app:8501
+}

@@ -1,0 +1,57 @@
+# Triển khai trên máy chủ nội bộ CMIT. Chỉ cổng 443 của proxy được mở. Container app không publish cổng.
+# Xem DEPLOY.md trước khi chạy.
+name: cmit-housekeeping
+
+services:
+  app:
+    build: .
+    image: cmit-housekeeping:3.0.0
+    restart: unless-stopped
+    # Không có "ports": app không truy cập được trực tiếp từ mạng, chỉ qua proxy.
+    expose:
+      - "8501"
+    environment:
+      CMIT_AUTH_MODE: proxy
+      CMIT_USER_HEADER: X-Auth-Request-Email
+      CMIT_WORKSPACE: /data/workspace
+      CMIT_TEMP_DIR: /data/tmp
+      CMIT_MEMORY_LIMIT: ${CMIT_MEMORY_LIMIT:-2GB}
+      STREAMLIT_SERVER_ENABLE_CORS: "false"
+      STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION: "true"
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    volumes:
+      - cmit_data:/data
+    mem_limit: ${CMIT_CONTAINER_MEM:-6g}
+    networks: [cmit_net]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: false  # Streamlit và DuckDB cần ghi vào /data và /tmp
+
+  proxy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      # Thay bằng IP nội bộ của máy chủ nếu muốn giới hạn, ví dụ "10.0.0.5:443:443"
+      - "${CMIT_BIND_IP:-0.0.0.0}:443:443"
+    environment:
+      CMIT_HOST: ${CMIT_HOST:?Đặt CMIT_HOST trong file .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/certs:/etc/caddy/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [cmit_net]
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  cmit_net:
+    driver: bridge
+
+volumes:
+  cmit_data:
+  caddy_data:
+  caddy_config:
